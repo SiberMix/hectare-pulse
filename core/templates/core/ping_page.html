@@ -1,0 +1,22 @@
+<h1>Ping Tasks</h1>
+<a href="{% url 'send-ping' %}">Start New Ping</a>
+<table>
+    <thead>
+    <tr>
+        <th>URL</th>
+        <th>Status</th>
+        <th>Last Pinged</th>
+        <th>Result</th>
+    </tr>
+    </thead>
+    <tbody>
+    {% for task in tasks %}
+        <tr>
+            <td>{{ task.url }}</td>
+            <td>{{ task.status }}</td>
+            <td>{{ task.last_pinged }}</td>
+            <td>{{ task.result }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>

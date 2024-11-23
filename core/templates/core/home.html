@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hectare Эмулятор</title>
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css"/>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            background-color: #f4f7fc;
+        }
+
+        header {
+            background-color: #0044cc;
+            color: white;
+            padding: 20px;
+            text-align: center;
+            position: relative;
+            width: 100%;
+        }
+
+        .content {
+            display: flex;
+            height: calc(100vh - 80px); /* Оставляем место для шапки */
+        }
+
+        .container {
+            width: 50%; /* Форма занимает 50% */
+            padding: 20px;
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
+            overflow-y: auto;
+            margin-left: 20px;
+        }
+
+        .input-group {
+            margin-bottom: 15px;
+        }
+
+        .input-group label {
+            font-weight: bold;
+            margin-bottom: 5px;
+            display: block;
+        }
+
+        .input-group select, .input-group input, .input-group textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+
+        .input-group button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            width: 100%;
+            font-size: 16px;
+        }
+
+        .input-group button:hover {
+            background-color: #45a049;
+        }
+
+        #map {
+            width: 70%; /* Карта занимает 50% */
+            height: 100%;
+            border-radius: 10px;
+        }
+
+        footer {
+            text-align: center;
+            padding: 10px;
+            background-color: #333;
+            color: white;
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>HectarePulse</h1>
+    <p>Введите настройки, выберите координаты на карте по которым будет "ездить техника" на карте</p>
+
+    <!-- Форма для выхода -->
+    <form action="{% url 'logout' %}" method="POST">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-danger">Выйти</button>
+    </form>
+</header>
+
+<div class="content">
+    <!-- Форма слева -->
+    <div class="container">
+        <form method="POST" action="{% url 'send-ping' %}">
+            {% csrf_token %}
+
+            <div class="input-group">
+                <label for="pingType">Тип пинга</label>
+                <select name="ping_type" id="pingType" required>
+                    <option value="one_time">Одноразовый пинг</option>
+                    <option value="recurring">Многоразовый пинг</option>
+                </select>
+            </div>
+
+            <div class="input-group" id="intervalGroup" style="display:none;">
+                <label for="interval">Периодичность (в секундах)</label>
+                <input type="number" name="interval" id="interval" min="1" placeholder="Введите интервал в секундах">
+            </div>
+
+            <div class="input-group">
+                <label for="saveToClickhouse">Сохранять в ClickHouse?</label>
+                <input type="checkbox" name="save_to_clickhouse" id="saveToClickhouse">
+            </div>
+            <div class="input-group">
+                <label for="saveToClickhouse">Полный цикл жизни симулятора?</label>
+                <p>Проходит по всем шагам авторизации, записывается в кликхаус, и портит статистику недостоверной
+                    информацией</p>
+                <input type="checkbox" name="save_to_clickhouse" id="saveToClickhouse">
+            </div>
+            <div class="input-group">
+                <label for="routeCoordinates">Маршрут (в формате JSON)</label>
+                <p for="routeCoordinates">Проставляется автоматически если вы выбираете точки на карте или введите
+                    словарь по аналогии ниже</p>
+                <textarea name="route_coordinates" id="routeCoordinates"
+                          placeholder='[{"lat": 52.5200, "lng": 13.4050}, {"lat": 48.8566, "lng": 2.3522}]'></textarea>
+            </div>
+
+            <!-- Добавление поля для выбора IMEI -->
+            <div class="input-group">
+                <label for="imei">Введите IMEI устройства</label>
+                <input type="text" name="imei" id="imei" placeholder="Введите IMEI устройства" required>
+            </div>
+
+            <div class="input-group">
+                <button type="submit">Начать пинг</button>
+            </div>
+            <div class="input-group">
+                <button class="clear-button" id="clearMapButton">Очистить карту</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Карта справа -->
+    <div id="map"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+<script>
+    // Инициализация карты с координатами Новосибирска
+    var map = L.map('map').setView([55.0415, 82.9346], 12); // Новосибирск
+
+    // Добавляем слой карты
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(map);
+
+    // Слой для маркеров
+    var markerLayer = L.layerGroup().addTo(map);
+
+    // Слой для линий
+    var routeLayer = L.layerGroup().addTo(map);
+
+    // Массив для хранения координат маркеров
+    var markerCoordinates = [];
+
+    // Обработчик для изменения маршрута
+    document.getElementById('routeCoordinates').addEventListener('change', function () {
+        var coordinates = JSON.parse(this.value);
+        routeLayer.clearLayers();  // Очищаем старые линии
+        if (coordinates && Array.isArray(coordinates)) {
+            var latlngs = coordinates.map(function (coord) {
+                return [coord.lat, coord.lng];
+            });
+            L.polyline(latlngs, { color: 'blue' }).addTo(routeLayer);
+        }
+    });
+
+    // Функция для добавления маркеров и линий
+    map.on('click', function (e) {
+        var latlng = e.latlng;
+
+        // Добавляем маркер
+        var marker = L.marker(latlng).addTo(markerLayer);
+        var markerCount = markerLayer.getLayers().length;
+        marker.bindPopup('Метка №' + markerCount).openPopup();
+
+        // Добавляем координаты маркера в массив
+        markerCoordinates.push({ lat: latlng.lat, lng: latlng.lng });
+
+        // Добавляем линии между маркерами
+        if (markerCoordinates.length > 1) {
+            var latlngs = markerCoordinates.map(function (coord) {
+                return [coord.lat, coord.lng];
+            });
+            routeLayer.clearLayers(); // Очищаем старые линии
+            L.polyline(latlngs, { color: 'blue' }).addTo(routeLayer);
+        }
+
+        // Обновляем значения в поле маршрута
+        updateRouteCoordinates();
+    });
+
+    // Функция для обновления маршрута в поле ввода
+    function updateRouteCoordinates() {
+        var coordinates = markerCoordinates;
+        document.getElementById('routeCoordinates').value = JSON.stringify(coordinates);
+    }
+
+    // Кнопка очистки карты
+    document.getElementById('clearMapButton').addEventListener('click', function () {
+        // Очищаем все маркеры и линии
+        markerLayer.clearLayers();
+        routeLayer.clearLayers();
+        // Очищаем массив с координатами
+        markerCoordinates = [];
+        // Очищаем поле маршрута
+        document.getElementById('routeCoordinates').value = '';
+    });
+
+</script>
+
+</body>
+</html>
